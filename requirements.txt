@@ -1,1 +1,4 @@
-
+playwright
+getindianname
+libnss3
+libatk-bridge2.0-0
