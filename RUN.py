@@ -1,85 +1,74 @@
-import threading
-import time
-import warnings
-
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
+from playwright.async_api import async_playwright
+import nest_asyncio
 from faker import Faker
-from playwright.sync_api import sync_playwright
 
-warnings.filterwarnings('ignore')
-fake = Faker('en_IN')
-MUTEX = threading.Lock()
+nest_asyncio.apply()
 
+# Flag to indicate whether the script is running
+running = True
 
-def sync_print(text):
-    with MUTEX:
-        print(text)
+async def start(wait_time, meetingcode):
+    try:
+        faker = Faker()
 
+        user = faker.name()  # Generate a random name using faker
 
-def start(name, user, wait_time, meetingcode, passcode):
-    sync_print(f"{name} started!")
+        print(f"{user} joined.")
 
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True, args=['--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'])
-        context = browser.new_context(permissions=['microphone'])
-        page = context.new_page()
-        page.goto(f'https://zoom.us/wc/join/{meetingcode}',timeout=200000)
+        async with async_playwright() as p:
+            browser = await p.chromium.launch(
+                headless=True,
+                args=['--no-sandbox', '--disable-dev-shm-usage']
+            )
+            context = await browser.new_context()
 
-        try:
-            page.click('//button[@id="onetrust-accept-btn-handler"]')
-        except:
-            page
-        try:
-            page.click('//button[@id="wc_agree1"]')
-        except:
-            pass
+            page = await context.new_page()
+            await page.goto(f'http://app.zoom.us/wc/join/{meetingcode}', timeout=200000)
 
+            # Explicitly request microphone permission using JavaScript multiple times
+            for _ in range(5):
+                await page.evaluate('() => { navigator.mediaDevices.getUserMedia({ audio: true }); }')
 
-        page.wait_for_selector('input[type="text"]',timeout=200000)
-        page.fill('input[type="text"]', user)
-        page.fill('input[type="password"]', passcode)
-        join_button = page.wait_for_selector('button.preview-join-button')
-        join_button.click()
+            try:
+                await page.click('//button[@id="onetrust-accept-btn-handler"]', timeout=5000)
+            except Exception as e:
+                pass
 
-        try:
-            # Increase timeout if still mic missing on some users
-            query = '//button[text()="Join Audio by Computer"]'
-            mic_button_locator = page.wait_for_selector(query, timeout=200000)
-            mic_button_locator.wait_for_element_state('stable', timeout=200000)
-            mic_button_locator.evaluate_handle('node => node.click()')
-            sync_print(f"{name} mic aayenge.")
+            try:
+                await page.click('//button[@id="wc_agree1"]', timeout=5000)
+            except Exception as e:
+                pass
 
-        except Exception as e:
-            print(e)
-            sync_print(f"{name} mic nhi aayenge.")
+            try:
+                await page.wait_for_selector('input[type="text"]', timeout=200000)
+                await page.fill('input[type="text"]', user)
+                # No need to fill passcode
+                join_button = await page.wait_for_selector('button.preview-join-button', timeout=200000)
+                await join_button.click()
+            except Exception as e:
+                pass
 
-        sync_print(f"{name} sleep for {wait_time} seconds ...")
-        time.sleep(wait_time)
-        sync_print(f"{name} ended!")
+            try:
+                await page.wait_for_selector('button.join-audio-by-voip__join-btn', timeout=300000)
+                query = 'button[class*="join-audio-by-voip__join-btn"]'
+                mic_button_locator = await page.query_selector(query)
+                await asyncio.sleep(5)
+                await mic_button_locator.evaluate_handle('node => node.click()')
+                print(f"{user} mic aayenge.")
+            except Exception as e:
+                print(f"{user} mic nahe aayenge. ", e)
 
-        browser.close()
+            print(f"{user} sleep for {wait_time} seconds ...")
+            while running and wait_time > 0:
+                await asyncio.sleep(1)
+                wait_time -= 1
+            print(f"{user} ended!")
 
+        # Close the context and browser outside of the async with block
+        await context.close()
+        await browser.close()
 
-def main():
-    sec = 10
-    wait_time = sec * 60
-    workers = []
-    for i in range(number):
-        try:
-            user = fake.name()
-        except IndexError:
-            break
-        wk = threading.Thread(target=start, args=(
-            f'[Thread{i}]', user, wait_time, meetingcode, passcode))
-        workers.append(wk)
-    for wk in workers:
-        wk.start()
-    for wk in workers:
-        wk.join()
-
-
-if __name__ == '__main__':
-    number = int(input("Enter number of Users: "))
-    meetingcode = input("Enter meeting code (No Space): ")
-    passcode = input("Enter Password (No Space): ")
-
-    main()
+    except Exception as e:
+        print(f"An error occurred: {e}")
